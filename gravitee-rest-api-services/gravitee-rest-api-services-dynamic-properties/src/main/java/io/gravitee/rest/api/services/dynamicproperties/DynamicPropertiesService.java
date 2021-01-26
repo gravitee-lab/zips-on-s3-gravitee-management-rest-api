@@ -33,7 +33,10 @@ import io.vertx.core.Vertx;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 import org.springframework.beans.factory.annotation.Autowired;
+import org.springframework.scheduling.support.CronTrigger;
+import org.springframework.scheduling.support.SimpleTriggerContext;
 
+import java.util.Date;
 import java.util.HashMap;
 import java.util.Map;
 
@@ -59,7 +62,7 @@ public class DynamicPropertiesService extends AbstractService implements EventLi
     @Autowired
     private Node node;
 
-    private final Map<ApiEntity, Long> timers = new HashMap<>();
+    private final Map<ApiEntity, CronHandler> handlers = new HashMap<>();
 
     @Override
     protected String name() {
@@ -109,14 +112,13 @@ public class DynamicPropertiesService extends AbstractService implements EventLi
 
                     updater.setProvider(provider);
                     updater.setApiService(apiService);
-                    logger.info("Add a scheduled task to poll dynamic properties each {} {} ", dynamicPropertyService.getTrigger().getRate(),
-                            dynamicPropertyService.getTrigger().getUnit());
+                    logger.info("Add a scheduled task to poll dynamic properties each {}", dynamicPropertyService.getSchedule());
 
                     // Force the first refresh, and then run it periodically
                     updater.handle(null);
-
-                    long periodicTimer = vertx.setPeriodic(getDelayMillis(dynamicPropertyService.getTrigger()), updater);
-                    timers.put(api, periodicTimer);
+                    CronHandler cronHandler = new CronHandler(vertx, dynamicPropertyService.getSchedule());
+                    cronHandler.schedule(updater);
+                    handlers.put(api, cronHandler);
                 }
             } else {
                 logger.info("Dynamic properties service is disabled for: {} [{}]", api.getName(), api.getVersion());
@@ -124,26 +126,11 @@ public class DynamicPropertiesService extends AbstractService implements EventLi
         }
     }
 
-    private long getDelayMillis(Trigger trigger) {
-        switch (trigger.getUnit()) {
-            case MILLISECONDS:
-                return trigger.getRate();
-            case SECONDS:
-                return trigger.getRate() * 1000;
-            case MINUTES:
-                return trigger.getRate() * 1000 * 60;
-            case HOURS:
-                return trigger.getRate() * 1000 * 60 * 60;
-        }
-
-        return -1;
-    }
-
     private void stopDynamicProperties(ApiEntity api) {
-        Long timer = timers.remove(api);
-        if (timer != null) {
+        CronHandler handler = handlers.remove(api);
+        if (handler != null) {
             logger.info("Stop Dynamic properties service for API id[{}] name[{}]", api.getId(), api.getName());
-            vertx.cancelTimer(timer);
+            handler.cancel();
         }
     }
 }
