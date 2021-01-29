@@ -27,9 +27,11 @@ import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.stereotype.Component;
+import org.springframework.util.CollectionUtils;
 
 import java.util.List;
 import java.util.Optional;
+import java.util.function.Supplier;
 import java.util.stream.Collectors;
 import java.util.stream.Stream;
 
@@ -76,10 +78,15 @@ public class EnvironmentServiceImpl extends TransactionalService implements Envi
 
     @Override
     public List<EnvironmentEntity> findByUser(String userId) {
+        return findByUser(userId, null, null);
+    }
+
+    @Override
+    public List<EnvironmentEntity> findByUser(String userId, String idFilter, String hridFilter) {
         try {
             LOGGER.debug("Find all environments by user");
 
-            Stream<Environment> envStream = environmentRepository.findAll().stream();
+            Stream<Environment> envStream = environmentRepository.findByOrganization(GraviteeContext.getCurrentOrganization()).stream();
 
             if (userId != null) {
                 final List<String> stringStream = membershipService
@@ -89,6 +96,23 @@ public class EnvironmentServiceImpl extends TransactionalService implements Envi
                         .collect(Collectors.toList());
 
                 envStream = envStream.filter(env -> stringStream.contains(env.getId()));
+            }
+
+            // When idFilter and hridFilter are equals, we keep environments that match at least one of these filter.
+            if (idFilter != null && idFilter.equals(hridFilter)) {
+                envStream = envStream.filter(env -> idFilter.equals(env.getId()) || !CollectionUtils.isEmpty(env.getHrids()) && env.getHrids().contains(hridFilter));
+            } else if(idFilter != null || hridFilter != null){
+                envStream = envStream.filter(env -> {
+                    boolean isValid = false;
+                    if (idFilter != null) {
+                        isValid = idFilter.equals(env.getId());
+                    }
+
+                    if (hridFilter != null && !isValid) {
+                        isValid = !CollectionUtils.isEmpty(env.getHrids()) && env.getHrids().contains(hridFilter);
+                    }
+                    return isValid;
+                });
             }
 
             return envStream
